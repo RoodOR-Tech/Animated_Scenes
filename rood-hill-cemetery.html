@@ -1558,6 +1558,28 @@ fn moonVisibility(p:vec3f,bias:f32)->f32{
   return mix(mix(a,b,xy.x),mix(c,d,xy.x),xy.y);
 }
 fn wickLevel(z:f32,progress:f32)->f32{let onset=clamp((z-24.43)*.073,0.,.58);return smoothstep(onset,onset+.40,progress);}
+const flames=array<vec3f,9>(vec3f(.62,2.263,24.429),vec3f(.51,2.089,24.485),vec3f(1.99,2.927,27.20),vec3f(-1.99,2.927,27.20),
+  vec3f(1.99,2.927,32.14),vec3f(-1.99,2.927,32.14),vec3f(1.944,1.453,27.89),vec3f(1.944,-.289,30.39),vec3f(1.944,-.859,31.88));
+fn glare(dir:vec3f,depth:f32)->vec3f{
+  var g=vec3f(0.);
+  let t=camera.eye.w;
+  for(var i=0u;i<13u;i++){
+    var c:vec3f;var power:f32;var size:f32;var tint:vec3f;
+    if(i<4u){
+      c=camera.lanterns[i].xyz+vec3f(0.,.06,0.);size=1.;tint=vec3f(1.,.50,.17);
+      power=.84+.10*sin(t*8.7+f32(i)*3.7)+.06*sin(t*13.2+f32(i)*21.);
+    }else{
+      c=flames[i-4u];size=.62;tint=vec3f(1.,.56,.21);
+      power=.72*wickLevel(c.z,camera.tomb.w)*(.94+.06*sin(t*9.+c.z));
+    }
+    if(power<.002){continue;}
+    let L=c-camera.eye.xyz;let d=length(L);
+    let a=max(0.,1.-dot(dir,L/d));let r2=2.*a*d*d;
+    let seen=smoothstep(d-.40,d-.10,depth);
+    g+=tint*power*seen*(.80*exp(-r2/(size*size*.0016))+.30*exp(-r2/(size*size*.030))+.07*exp(-a*700.))/(1.+d*.085);
+  }
+  return g;
+}
 fn atmosphere(dir:vec3f,depth:f32)->vec4f{
   let len=min(35.,depth);
   var tr=1.;
@@ -1599,7 +1621,7 @@ struct ScreenOut { @builtin(position) pos:vec4f, @location(0) uv:vec2f };
   let ray=normalize(camera.forward.xyz+camera.right.xyz*input.uv.x/camera.right.w+
                     camera.up.xyz*input.uv.y/camera.up.w);
   let air=atmosphere(ray,32.);
-  return vec4f((sky(ray)+vec3f(.60,.75,1.)*camera.vault.w*(.08+.73*pow(max(0.,dot(ray,normalize(vec3f(-.21,.39,.90)))),8.)))*air.a+air.rgb,1);
+  return vec4f((sky(ray)+vec3f(.60,.75,1.)*camera.vault.w*(.08+.73*pow(max(0.,dot(ray,normalize(vec3f(-.21,.39,.90)))),8.)))*air.a+air.rgb+glare(ray,1e4),1);
 }
 
 struct SceneOut {
@@ -1687,7 +1709,7 @@ fn actorIndex(mat:f32)->i32{
     let moss=smoothstep(.56,.81,cloud(p.xz*2.+p.y*vec2f(.32,-1.1)))*(1.-smoothstep(.22,1.43,p.y-p.z*.036));
     base=mix(base,vec3f(.13,.20,.115),moss*select(.63,.14,kind==19.));
     let scale=noise(uv*31.)*noise(uv*9.);
-    if(kind==19.){base=mix(base,vec3f(.29,.127,.058),smoothstep(.24,.47,scale)*.74);}
+    if(kind==19.){base=mix(base,vec3f(.20,.108,.062),smoothstep(.30,.52,scale)*.55);}
     if(kind==15.||kind==8.){
       let running=noise(vec2f(uv.x*28.7,uv.y*3.1));
       let pores=smoothstep(.53,.87,noise(uv*49.));
@@ -1714,9 +1736,10 @@ fn actorIndex(mat:f32)->i32{
   if(kind==2.){
     let ironGrain=noise(p.xz*87.+p.y*vec2f(38.,23.));
     let scale=noise(p.xz*3.7+p.y*vec2f(2.3,4.8))*.64+noise(p.xz*16.+p.y*vec2f(12.,9.))*.24+ironGrain*.12;
-    let oxide=smoothstep(.43,.63,scale);
-    let crust=smoothstep(.53,.74,scale+.10*ironGrain);
-    base=mix(base*(.67+.48*ironGrain),mix(vec3f(.17,.083,.045),vec3f(.46,.224,.103),crust),oxide*.92);
+    let low=1.-smoothstep(.10,1.05,p.y-.036*p.z);
+    let oxide=smoothstep(.50,.72,scale)*(.28+.72*low);
+    let crust=smoothstep(.56,.78,scale+.10*ironGrain);
+    base=mix(base*(.62+.40*ironGrain),mix(vec3f(.105,.062,.042),vec3f(.25,.135,.075),crust),oxide*.80);
   }
   var color=base*(.24+side*.30)*vec3f(.70,.83,1.04);
   color+=vec3f(.019,.024,.034)*side;
@@ -1817,7 +1840,7 @@ fn actorIndex(mat:f32)->i32{
   }
   if(kind==28.){let burn=wickLevel(p.z,camera.tomb.w);color=vec3f(4.1*burn,1.95*burn*burn,.44*burn*burn)*(.94+.06*sin(t*9.+p.z));}
   let air=atmosphere(delta/dist,dist);
-  return vec4f(color*air.a+air.rgb,1);
+  return vec4f(color*air.a+air.rgb+glare(delta/dist,dist),1);
 }
 @group(1) @binding(0) var sceneColor: texture_2d<f32>;
 @group(1) @binding(1) var bloomSampler: sampler;
@@ -1958,6 +1981,30 @@ float moonVisibility(vec3 p,float bias){
   return mix(mix(a,b,xy.x),mix(c,d,xy.x),xy.y);
 }
 float wickLevel(float z,float progress){float onset=clamp((z-24.43)*.073,0.,.58);return smoothstep(onset,onset+.40,progress);}
+// Flame positions match the candle geometry: entrance shelf, chamber sconces, stair ledges.
+const vec3 flames[9]=vec3[9](vec3(.62,2.263,24.429),vec3(.51,2.089,24.485),vec3(1.99,2.927,27.20),vec3(-1.99,2.927,27.20),
+  vec3(1.99,2.927,32.14),vec3(-1.99,2.927,32.14),vec3(1.944,1.453,27.89),vec3(1.944,-.289,30.39),vec3(1.944,-.859,31.88));
+// Light scattered around each open flame by the damp air and the eye. Hidden when a surface sits in front of the flame.
+vec3 glare(vec3 dir,float depth){
+  vec3 g=vec3(0.);
+  float t=eye.w;
+  for(int i=0;i<13;i++){
+    vec3 c;float power,size;vec3 tint;
+    if(i<4){
+      c=lantern[i].xyz+vec3(0.,.06,0.);size=1.;tint=vec3(1.,.50,.17);
+      power=.84+.10*sin(t*8.7+float(i)*3.7)+.06*sin(t*13.2+float(i)*21.);
+    }else{
+      c=flames[i-4];size=.62;tint=vec3(1.,.56,.21);
+      power=.72*wickLevel(c.z,tomb.w)*(.94+.06*sin(t*9.+c.z));
+    }
+    if(power<.002)continue;
+    vec3 L=c-eye.xyz;float d=length(L);
+    float a=max(0.,1.-dot(dir,L/d)),r2=2.*a*d*d;
+    float seen=smoothstep(d-.40,d-.10,depth);
+    g+=tint*power*seen*(.80*exp(-r2/(size*size*.0016))+.30*exp(-r2/(size*size*.030))+.07*exp(-a*700.))/(1.+d*.085);
+  }
+  return g;
+}
 vec4 atmosphere(vec3 dir,float depth){
   float tr=1.,dt=min(36.,depth)/9.;
   vec3 fog=vec3(0.);
@@ -2027,7 +2074,7 @@ void main(){
   c=mix(c,photo*photo*.78,.965);
   vec4 air=atmosphere(dir,32.);
   c+=vec3(.60,.75,1.)*vault.w*(.08+.73*pow(max(0.,dot(dir,normalize(vec3(-.21,.39,.90)))),8.));
-  outColor=vec4(filmic(c*air.a+air.rgb),1.);
+  outColor=vec4(filmic(c*air.a+air.rgb+glare(dir,1e4)),1.);
 }
 `;
 const sceneVertGL = `
@@ -2110,7 +2157,7 @@ void main(){
     float moss=smoothstep(.56,.81,cloud(p.xz*2.+p.y*vec2(.32,-1.1)))*(1.-smoothstep(.22,1.43,p.y-p.z*.036));
     base=mix(base,vec3(.13,.20,.115),moss*(kind==19.?.14:.63));
     float scale=noise(uv*31.)*noise(uv*9.);
-    if(kind==19.)base=mix(base,vec3(.29,.127,.058),smoothstep(.24,.47,scale)*.74);
+    if(kind==19.)base=mix(base,vec3(.20,.108,.062),smoothstep(.30,.52,scale)*.55);
     if(kind==15.||kind==8.){
       float running=noise(vec2(uv.x*28.7,uv.y*3.1));
       float pores=smoothstep(.53,.87,noise(uv*49.));
@@ -2137,9 +2184,10 @@ void main(){
   if(kind==2.){
     float ironGrain=noise(p.xz*87.+p.y*vec2(38.,23.));
     float scale=noise(p.xz*3.7+p.y*vec2(2.3,4.8))*.64+noise(p.xz*16.+p.y*vec2(12.,9.))*.24+ironGrain*.12;
-    float oxide=smoothstep(.43,.63,scale);
-    float crust=smoothstep(.53,.74,scale+.10*ironGrain);
-    base=mix(base*(.67+.48*ironGrain),mix(vec3(.17,.083,.045),vec3(.46,.224,.103),crust),oxide*.92);
+    float low=1.-smoothstep(.10,1.05,p.y-.036*p.z);
+    float oxide=smoothstep(.50,.72,scale)*(.28+.72*low);
+    float crust=smoothstep(.56,.78,scale+.10*ironGrain);
+    base=mix(base*(.62+.40*ironGrain),mix(vec3(.105,.062,.042),vec3(.25,.135,.075),crust),oxide*.80);
   }
   vec3 color=base*(.24+side*.30)*vec3(.70,.83,1.04);
   color+=vec3(.019,.024,.034)*side;
@@ -2235,7 +2283,7 @@ void main(){
   }
   if(kind==28.){float burn=wickLevel(p.z,tomb.w);color=vec3(4.1*burn,1.95*burn*burn,.44*burn*burn)*(.94+.06*sin(t*9.+p.z));}
   vec4 air=atmosphere(delta/dist,dist);
-  outColor=vec4(filmic(color*air.a+air.rgb),1.);
+  outColor=vec4(filmic(color*air.a+air.rgb+glare(delta/dist,dist)),1.);
 }
 `;
 
@@ -2931,14 +2979,20 @@ function thunder(delay){
   src.onended=()=>{src.disconnect();if(thunderSource===src)thunderSource=null;};
   thunderSource=src;src.start(audio.currentTime+delay);
 }
+const strokes=[[0,1,9.5],[.105,.58,15],[.235,.88,8.2],[.52,.36,7]];
 function storm(now){
   if(mode==='menu'||document.hidden)return 0;
   if(now>=nextStrike){
-    flashBegan=now;nextStrike=now+30;thunder(.86);
+    // The display loop keeps its fixed rhythm. On foot, strikes are irregular and vary in distance.
+    const walking=mode==='walking';
+    flashBegan=now;nextStrike=now+(walking?24+Math.random()*16:30);thunder(walking?.65+Math.random()*1.6:.86);
   }
   const age=now-flashBegan;
-  if(age>.90)return 0;
-  return reduced.matches?.18*exp(-age*3.8):exp(-age*6.6);
+  if(age>1.3)return 0;
+  if(reduced.matches)return .18*exp(-age*3.8);
+  let flash=0;
+  for(const [at,peak,decay] of strokes)if(age>=at)flash=max(flash,peak*exp(-(age-at)*decay));
+  return flash;
 }
 
 // A single unbroken call from the trees, with a softer reflection from the hillside.
@@ -2980,9 +3034,83 @@ function woodlandAmbience(now,camera){
   wolfHowl(camera);nextHowl=now+48+Math.random()*15;
 }
 
+// A generated impulse response gives the stone rooms their tail. The send rises as the visitor goes inside.
+let reverbSend,stepClips,lastStep=-1,stepVoice=0,roomLevel=0;
+function impulse(seconds,decay){
+  const rate=audio.sampleRate,length=Math.ceil(seconds*rate),ir=audio.createBuffer(2,length,rate);
+  for(let ch=0;ch<2;ch++){
+    const out=ir.getChannelData(ch);let dull=0;
+    for(let i=0;i<length;i++){
+      const t=i/rate,n=Math.random()*2-1;
+      dull+=(n-dull)*(.16+.5*exp(-t*3));
+      const early=t<.09&&Math.random()<.004?(Math.random()*2-1)*1.4:0;
+      out[i]=(dull+early)*exp(-t*decay)*min(1,t*400);
+    }
+  }
+  return ir;
+}
+function makeStepClips(){
+  const rate=audio.sampleRate,make=(len,fn)=>Array.from({length:4},()=>{
+    const clip=audio.createBuffer(1,Math.ceil(len*rate),rate),out=clip.getChannelData(0);
+    fn(out,rate);return clip;
+  });
+  return {
+    // Gravel: a dull press with many small stones shifting under the heel.
+    gravel:make(.24,(out,rate)=>{
+      let low=0;
+      for(let i=0;i<out.length;i++){
+        const t=i/rate,n=Math.random()*2-1;low+=(n-low)*.18;
+        const grit=Math.random()<.035*exp(-t*14)?(Math.random()*2-1)*2.2:0;
+        out[i]=(low*.9*exp(-t*26)+grit*exp(-t*9)+n*.12*exp(-t*30))*min(1,t*900);
+      }
+    }),
+    // Wet grass: a soft brush with little attack.
+    grass:make(.28,(out,rate)=>{
+      let low=0,mid=0;
+      for(let i=0;i<out.length;i++){
+        const t=i/rate,n=Math.random()*2-1;low+=(n-low)*.05;mid+=(n-mid)*.32;
+        out[i]=(low*1.6+(mid-low)*.35)*sstep(0,.03,t)*exp(-t*13);
+      }
+    }),
+    // Flagstone: a short heel knock with a gritty scrape.
+    stone:make(.2,(out,rate)=>{
+      let high=0,prev=0;
+      for(let i=0;i<out.length;i++){
+        const t=i/rate,n=Math.random()*2-1;high=.6*(high+n-prev);prev=n;
+        out[i]=(sin(TAU*(118-140*t)*t)*.9*exp(-t*38)+high*.22*exp(-t*55)+n*.05*exp(-t*18))*min(1,t*1500);
+      }
+    })
+  };
+}
+function footstep(camera){
+  if(!soundOn||!audio||audio.state!=='running')return;
+  stepClips??=makeStepClips();
+  const inside=abs(camera.x)<2.95&&camera.z>23.0&&camera.z<33.2;
+  const surface=inside?'stone':abs(camera.x-pathX(camera.z))<1.15?'gravel':'grass';
+  const src=audio.createBufferSource(),gain=audio.createGain(),pan=audio.createStereoPanner();
+  src.buffer=stepClips[surface][floor(Math.random()*4)];src.playbackRate.value=.9+.2*Math.random();
+  gain.gain.value=(surface==='stone'?.30:surface==='gravel'?.36:.22)*(.85+.3*Math.random());
+  stepVoice^=1;pan.pan.value=stepVoice?.12:-.12;
+  src.connect(gain);gain.connect(pan);pan.connect(master);
+  src.onended=()=>{src.disconnect();gain.disconnect();pan.disconnect();};src.start();
+}
+function audioSpace(camera){
+  if(!audio||!reverbSend)return;
+  const inside=(1-sstep(2.6,3.1,abs(camera.x)))*sstep(23.0,24.2,camera.z)*(1-sstep(32.9,33.4,camera.z));
+  const below=sstep(.5,-1.2,camera.y-1.63);
+  const level=inside*(.7+.3*below);
+  if(abs(level-roomLevel)<.01)return;
+  roomLevel=level;
+  const now=audio.currentTime;
+  reverbSend.gain.setTargetAtTime(.10+.42*level,now,.35);
+  windGain.gain.setTargetAtTime(.62*(1-.72*level),now,.5);
+}
 function makeAudio(){
   audio=new AudioContext();
   master=audio.createGain();master.gain.value=0;master.connect(audio.destination);
+  const verb=audio.createConvolver();verb.buffer=impulse(3.2,2.1);
+  reverbSend=audio.createGain();reverbSend.gain.value=.10;
+  master.connect(reverbSend);reverbSend.connect(verb);verb.connect(audio.destination);
   const buffer=audio.createBuffer(1,audio.sampleRate*4,audio.sampleRate);
   const samples=buffer.getChannelData(0);let noiseSample=0;
   for(let i=0;i<samples.length;i++){
@@ -3010,14 +3138,26 @@ async function setAudio(enabled){
   }catch(err){console.warn(err);soundButton.textContent='Audio unavailable';soundButton.disabled=true;}
 }
 function toggleAudio(){audioChoice=true;return setAudio(!soundOn);}
+// A cast bell is inharmonic: hum, prime, minor-third tierce, quint and nominal, each a slightly split pair that beats.
 function bell(){
   if(!soundOn || !audio)return;
-  for(const [freq,level,decay] of [[110,.12,2.5],[223,.10,2],[334,.07,1.5],[517,.034,.85],[727,.021,.56]]){
-    const o=audio.createOscillator(),g=audio.createGain(),now=audio.currentTime;
-    o.frequency.value=freq;g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(level,now+.095);
-    g.gain.exponentialRampToValueAtTime(.0001,now+decay);
-    o.connect(g);g.connect(master);o.start(now);o.stop(now+decay+.02);
+  const now=audio.currentTime,prime=223;
+  for(const [ratio,level,decay,split] of [[.5,.075,7,.42],[1,.07,5,.61],[1.19,.055,3.6,.37],[1.5,.022,2.4,.5],[2,.05,3,.83],[2.51,.018,1.7,0],[2.66,.016,1.4,0],[4.03,.008,.8,0]]){
+    for(const offset of split?[0,split]:[0]){
+      const o=audio.createOscillator(),g=audio.createGain();
+      o.frequency.value=prime*ratio+offset;
+      g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(level*(split?.62:1),now+.006);
+      g.gain.exponentialRampToValueAtTime(.0001,now+decay);
+      o.connect(g);g.connect(master);o.start(now);o.stop(now+decay+.05);
+      o.onended=()=>{o.disconnect();g.disconnect();};
+    }
   }
+  // The clapper strike: a short metallic tick.
+  const rate=audio.sampleRate,hit=audio.createBuffer(1,Math.ceil(rate*.05),rate),out=hit.getChannelData(0);
+  for(let i=0;i<out.length;i++)out[i]=(Math.random()*2-1)*exp(-i/rate*140)*.5;
+  const src=audio.createBufferSource(),filter=audio.createBiquadFilter();
+  src.buffer=hit;filter.type='highpass';filter.frequency.value=1800;
+  src.connect(filter);filter.connect(master);src.onended=()=>{src.disconnect();filter.disconnect();};src.start(now);
 }
 
 // Two birds break the quiet. The other two still take flight on approach.
@@ -3218,6 +3358,9 @@ function updateWalk(dt,now){
     }
   }
   updateCorpse(dt,effects[2].phase);
+  const stride=floor((now*12-PI*1.5)/TAU);
+  if((x||z)&&stride!==lastStep&&lastStep>=0)footstep(player);
+  lastStep=(x||z)?stride:-1;
   const floorY=walkingFloor(player.x,player.z);
   player.y=mix(player.y,1.63+floorY+((x||z)&&!reduced.matches?.026*sin(now*12):0),min(1,dt*7));
   return player;
@@ -3337,6 +3480,7 @@ function tick(ms){
   if(mode!=='menu')candleProgress=advanceCandles(candleProgress,cam,min(.4,frameDelta));
   look(cam,reduced.matches&&mode==='menu'?0:now-sceneStart,phases,storm(now),mode==='menu'?0:candleProgress,mode==='walking');
   woodlandAmbience(now,cam);
+  if(soundOn)audioSpace(cam);
   renderer.draw(state);
   raf=requestAnimationFrame(tick);
 }
