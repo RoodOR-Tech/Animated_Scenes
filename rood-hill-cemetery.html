@@ -19,6 +19,8 @@
 body:after{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 48%,transparent 46%,#05080d45 100%)}
 canvas{display:block;width:100%;height:100%;touch-action:none}
 button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+/* Holding a control must not start a text selection or the long-press menu. */
+canvas,.tools,.touch,.tools button,.touch button{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
 button:focus-visible{outline:2px solid #f8d5a0;outline-offset:4px}
 button:disabled{opacity:.45;cursor:default}
 [hidden]{display:none!important}
@@ -3733,6 +3735,7 @@ document.addEventListener('mousemove',e=>{
   if(mode==='walking'&&document.pointerLockElement===canvas)steer(e.movementX,e.movementY,.0026);
 });
 function bindCanvas(){
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
 canvas.addEventListener('pointerdown',e=>{
   if(mode==='display'){lastInput=performance.now()/1000;document.body.classList.remove('display-idle');}
   if(mode!=='walking'||document.pointerLockElement===canvas||pointer)return;
@@ -3746,9 +3749,12 @@ canvas.addEventListener('pointermove',e=>{
 });
 canvas.addEventListener('lostpointercapture',()=>{pointer=null;});
 }
+for(const target of [$('touch'),$('tools')])target.addEventListener('contextmenu',e=>e.preventDefault());
 for(const btn of $('touch').querySelectorAll('button')){
   const key=btn.dataset.key;
-  btn.addEventListener('pointerdown',e=>{btn.setPointerCapture(e.pointerId);pressed.add(key);});
+  // Cancelling the touch stops Android and iOS treating a held arrow as a long press on text.
+  btn.addEventListener('touchstart',e=>{if(e.cancelable)e.preventDefault();},{passive:false});
+  btn.addEventListener('pointerdown',e=>{e.preventDefault();btn.setPointerCapture(e.pointerId);pressed.add(key);});
   btn.addEventListener('lostpointercapture',()=>pressed.delete(key));
 }
 window.addEventListener('resize',resize);
