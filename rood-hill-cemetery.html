@@ -6,6 +6,13 @@
 <meta name="theme-color" content="#0c1017">
 <meta name="description" content="A haunted cemetery you can walk through, with an automatic Halloween display mode.">
 <title>Rood Hill Cemetery</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rood Hill">
+<link rel="apple-touch-icon" href="icons/rood-hill-180.png">
+<link rel="icon" type="image/png" href="icons/rood-hill-192.png">
 <style>
 :root{color-scheme:dark;--ink:#eee8db;--dim:#b5b7bd;--gold:#e8bb7d;--panel:#111620}
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0c1017;color:var(--ink);font-family:system-ui,sans-serif}
@@ -28,10 +35,15 @@ h1 em{font-weight:400;color:#d7c9b4;font-size:.78em;letter-spacing:-.06em}
 #notice{max-width:470px;color:#ffd4aa;line-height:1.5}
 .tools{position:fixed;right:max(22px,env(safe-area-inset-right));top:max(20px,env(safe-area-inset-top));display:flex;gap:6px;z-index:2}
 .tools button,.touch button{background:#0a101ad9;border:1px solid #ddd5c642;padding:8px 11px;min-height:40px;font-size:12px}.tools button:hover,.touch button:active{background:#28333f}
-.touch{position:fixed;bottom:max(17px,env(safe-area-inset-bottom));left:17px;display:none;grid-template-columns:repeat(3,46px);gap:4px;z-index:2}
+.touch{position:fixed;bottom:max(17px,env(safe-area-inset-bottom));left:max(17px,env(safe-area-inset-left));display:none;grid-template-columns:repeat(3,46px);gap:4px;z-index:2}
 .touch button{touch-action:none;font-size:18px;padding:0;min-height:46px}.touch button:first-child{grid-column:2}.touch button:nth-child(2){grid-column:1}
 body.display-idle{cursor:none}body.display-idle .tools{opacity:0;pointer-events:none}body.display-idle .tools:focus-within{opacity:1;pointer-events:auto}body.display-idle .tools:has(:focus-visible){opacity:1;pointer-events:auto}
 @media(pointer:coarse){body.walking .touch{display:grid}}
+#tip{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:16px;background:#05080dcc}
+#tip div{max-width:420px;background:var(--panel);border:1px solid #e6dfce4d;padding:22px 22px 18px;line-height:1.55;font-size:15px}
+#tip h2{font-family:Georgia,serif;font-weight:400;font-size:26px;margin:0 0 10px}
+#tip ol{margin:10px 0 16px;padding-left:20px;color:#dedcdb}
+#tip button{padding:10px 16px;min-height:44px;font-weight:650;border:1px solid var(--gold);background:var(--gold);color:#241a13}
 @media(max-width:550px){#menu{padding:34px 27px}.label{margin-bottom:16px}.guide{margin:17px 0}.tools{right:15px;top:14px}}
 @media(max-height:470px){#menu{padding:24px 32px}h1{font-size:clamp(38px,11vh,69px)}.label{margin-bottom:12px}.guide{margin:10px 0}.hints{margin-top:8px}}
 </style>
@@ -47,11 +59,20 @@ body.display-idle{cursor:none}body.display-idle .tools{opacity:0;pointer-events:
     <div class="actions">
       <button id="walk" disabled>Enter the cemetery</button>
       <button id="display" disabled>Start display loop</button>
+      <button id="menuFull" type="button">Full screen</button>
     </div>
     <p class="hints" id="hints">Loading the cemetery…</p>
     <p id="notice" role="status" hidden></p>
   </div>
 </main>
+<div id="tip" role="dialog" aria-modal="true" aria-labelledby="tipTitle" hidden>
+  <div>
+    <h2 id="tipTitle">Play full screen</h2>
+    <p id="tipText"></p>
+    <ol id="tipSteps"></ol>
+    <button id="tipClose" type="button">Got it</button>
+  </div>
+</div>
 <div class="tools" id="tools" hidden>
   <button id="sound" type="button" aria-pressed="false">Sound off</button>
   <button id="full" type="button">Fullscreen</button>
@@ -3635,6 +3656,7 @@ function start(kind,userGesture=false){
   for(const effect of effects)Object.assign(effect,makeCue());
   corpseWalk=stalker();
   if(userGesture&&!audioChoice&&!soundOn)setAudio(true);
+  if(userGesture&&small.matches&&canFullscreen&&!installed&&!fullscreenElement())enterFullscreen();
   if(kind==='walking'){
     Object.assign(player,{x:.03,z:2.02,y:1.68,yaw:.025,pitch:.075});
     if(!small.matches && canvas.requestPointerLock){
@@ -3648,13 +3670,45 @@ walkButton.onclick=()=>start('walking',true);
 displayButton.onclick=()=>start('display',true);
 $('back').onclick=showMenu;
 soundButton.onclick=toggleAudio;
-if(!document.fullscreenEnabled && !document.documentElement.webkitRequestFullscreen)fullButton.hidden=true;
-fullButton.onclick=()=>{
+// Full screen: the Fullscreen API where the browser has it (desktop, Android, iPad).
+// Safari on iPhone does not offer it for pages, so there the button explains Add to Home Screen,
+// which opens the scene without browser bars (see the manifest and apple-mobile-web-app tags).
+const menuFullButton=$('menuFull'),tip=$('tip');
+const canFullscreen=!!(document.fullscreenEnabled||document.webkitFullscreenEnabled);
+const installed=matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches||navigator.standalone===true;
+const fullscreenElement=()=>document.fullscreenElement||document.webkitFullscreenElement;
+function enterFullscreen(){
   const el=document.documentElement;
-  const action=document.fullscreenElement?document.exitFullscreen?.():el.requestFullscreen?.()||el.webkitRequestFullscreen?.();
-  action?.catch?.(()=>{});
-};
-document.addEventListener('fullscreenchange',()=>{fullButton.textContent=document.fullscreenElement?'Exit fullscreen':'Fullscreen';});
+  try{
+    const request=el.requestFullscreen?el.requestFullscreen({navigationUI:'hide'}):el.webkitRequestFullscreen?.();
+    Promise.resolve(request).then(()=>screen.orientation?.lock?.('landscape')).catch(()=>{});
+  }catch{}
+}
+function exitFullscreen(){
+  try{Promise.resolve((document.exitFullscreen||document.webkitExitFullscreen)?.call(document)).catch(()=>{});}catch{}
+}
+function showFullscreenHelp(){
+  const iphone=/iPhone|iPod/.test(navigator.userAgent);
+  $('tipText').textContent=iphone?'Safari on iPhone can\'t show web pages full screen. Add Rood Hill to your home screen and it opens without the browser bars:':'This browser can\'t show the page full screen. Installing it gives the same result:';
+  $('tipSteps').innerHTML=iphone?'<li>Tap the Share button.</li><li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open Rood Hill from your home screen and turn the phone sideways.</li>':'<li>Open the browser menu.</li><li>Choose <b>Add to Home screen</b> or <b>Install app</b>.</li><li>Open Rood Hill from there.</li>';
+  tip.hidden=false;$('tipClose').focus();
+}
+function toggleFullscreen(){
+  if(!canFullscreen){showFullscreenHelp();return;}
+  if(fullscreenElement())exitFullscreen();else enterFullscreen();
+}
+function fullscreenLabels(){
+  const on=!!fullscreenElement();
+  fullButton.textContent=on?'Exit full screen':'Full screen';
+  menuFullButton.textContent=on?'Exit full screen':'Full screen';
+}
+$('tipClose').onclick=()=>{tip.hidden=true;};
+tip.addEventListener('keydown',e=>{if(e.code==='Escape'){e.stopPropagation();tip.hidden=true;}});
+if(installed)fullButton.hidden=menuFullButton.hidden=true;
+fullButton.onclick=menuFullButton.onclick=toggleFullscreen;
+fullscreenLabels();
+document.addEventListener('fullscreenchange',fullscreenLabels);
+document.addEventListener('webkitfullscreenchange',fullscreenLabels);
 document.addEventListener('pointerlockchange',()=>{
   if(mode==='walking' && !document.pointerLockElement && !small.matches)showMenu();
 });
