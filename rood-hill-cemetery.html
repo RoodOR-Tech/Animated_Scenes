@@ -973,7 +973,7 @@ function chamberPatina(){
 
 function cryptChamber(){
   buildCryptStairs();
-  const y=tombY,z=tombZ,depth=9.6,ash=[.33,.32,.286],brass=[.43,.326,.17];
+  const y=tombY,z=tombZ,depth=9.6,ash=[.33,.32,.286],brass=[.27,.212,.118];
   cutFloor(-2.93,2.93,z-.125,z+depth+.125,y-.10,.36,darkStone);
   box(0,y+.17,z+depth,5.82,3.85,.46,stone,0,15,.018);
   block(0,z+depth,2.96,.23);
@@ -1359,6 +1359,13 @@ function buildHaunts(){
 const guardianZ=tombZ+.64;
 const guardianY=tombY+.289;
 const vaultLamp=[.39,tombY+1.51,tombZ+1.19];
+// Matches the flames[] table in the shaders: entrance shelf, chamber sconces, stair ledges.
+const slabBlocks=(px,py,pz,cx,cy,cz)=>{
+  if((py<1.05)===(cy<1.05))return false;
+  const k=(1.09-py)/(cy-py),qx=px+(cx-px)*k,qz=pz+(cz-pz)*k;
+  return qx<.5||qx>2.03||qz<26.73||qz>32.05;
+};
+const flamePoints=[[.62,2.263,24.429],[.51,2.089,24.485],[1.99,2.927,27.20],[-1.99,2.927,27.20],[1.99,2.927,32.14],[-1.99,2.927,32.14],[1.944,1.453,27.89],[1.944,-.289,30.39],[1.944,-.859,31.88]];
 
 function buildVault(){
   const y=tombY,z=tombZ;
@@ -1580,6 +1587,33 @@ fn glare(dir:vec3f,depth:f32)->vec3f{
   }
   return g;
 }
+fn flameHeight(i:u32)->f32{return select(select(.046,.067,i<6u),.05,i<2u);}
+fn nearestFlame(p:vec3f)->u32{
+  var best=0u;var d=1e9;
+  for(var i=0u;i<9u;i++){let q=p-flames[i];let e=dot(q,q);if(e<d){d=e;best=i;}}
+  return best;
+}
+fn candleFlicker(c:vec3f,t:f32)->f32{return .88+.08*sin(t*9.3+c.z*7.)+.05*sin(t*23.+c.x*11.);}
+fn slabBlocks(p:vec3f,c:vec3f)->bool{
+  let floorY=1.09;
+  if((p.y<floorY-.04)==(c.y<floorY-.04)){return false;}
+  let q=p.xz+(c.xz-p.xz)*(floorY-p.y)/(c.y-p.y);
+  return q.x<.50||q.x>2.03||q.y<26.73||q.y>32.05;
+}
+fn candleHaze(dir:vec3f,depth:f32)->vec3f{
+  var h=0.;let len=min(depth,40.);
+  if(camera.tomb.w<.001){return vec3f(0.);}
+  for(var k=0u;k<9u;k++){
+    let c=flames[k];let power=wickLevel(c.z,camera.tomb.w);
+    if(power<.002){continue;}
+    let o=c-camera.eye.xyz;let s0=dot(o,dir);let close=camera.eye.xyz+dir*clamp(s0,0.,len);
+    let inside=(1.-smoothstep(2.45,2.99,abs(close.x)))*smoothstep(23.0,24.4,close.z)*(1.-smoothstep(32.7,33.2,close.z));
+    if(inside<.01||slabBlocks(close,c)){continue;}
+    let q=.05+2.2*max(dot(o,o)-s0*s0,0.);let k2=sqrt(2.2/q);
+    h+=power*candleFlicker(c,camera.eye.w)*inside*(atan((len-s0)*k2)+atan(s0*k2))/sqrt(2.2*q);
+  }
+  return vec3f(1.,.62,.34)*h*.023;
+}
 fn atmosphere(dir:vec3f,depth:f32)->vec4f{
   let len=min(35.,depth);
   var tr=1.;
@@ -1596,10 +1630,10 @@ fn atmosphere(dir:vec3f,depth:f32)->vec4f{
     let dy=(y-(.12+.41*bank))/(.15+.22*bank);
     let spill=exp(-distance(p,vec3f(0.,.97,22.6))*.57)*camera.vault.z;
     let outside=1.-(1.-smoothstep(2.45,2.99,abs(p.x)))*smoothstep(23.0,24.4,p.z)*(1.-smoothstep(32.7,33.2,p.z));
-    let density=.0028+outside*(.038*exp(-y*2.5)+.36*bank*exp(-dy*dy))+.043*spill*exp(-y*.9);
+    let density=.0028+outside*(.038*exp(-y*2.5)+.36*bank*exp(-dy*dy))+.043*spill*exp(-y*.9)+(1.-outside)*.034;
     let amount=1.-exp(-density*dt);
-    var energy=vec3f(.084,.119,.173)+vec3f(.15,.20,.27)*lobe*moonVisibility(p,.11);
-    energy+=vec3f(.58,.73,.96)*camera.vault.w;
+    var energy=(vec3f(.084,.119,.173)+vec3f(.15,.20,.27)*lobe*moonVisibility(p,.11))*mix(.10,1.,outside);
+    energy+=vec3f(.58,.73,.96)*camera.vault.w*mix(.15,1.,outside);
     for(var j=0u;j<4u;j++){
       let diff=camera.lanterns[j].xyz-p;
       energy+=vec3f(.72,.29,.065)*.73/(1.+dot(diff,diff)*1.20);
@@ -1673,6 +1707,11 @@ fn actorIndex(mat:f32)->i32{
     p.x+=.065*sin(lift*3.14);
   }
   if(mat==5.){p.x+=max(0.,pos.y-pos.z*.036)*.13*sin(t*1.5+p.z*3.2+p.x);}
+  if(mat==28.){
+    let f=nearestFlame(pos);let c=flames[f];let up=clamp((pos.y-c.y)/flameHeight(f)+.6,0.,1.7);
+    p=p+vec3f(sin(t*6.1+c.z*5.)+.4*sin(t*15.+c.x*9.),0.,cos(t*7.3+c.x*4.))*.0055*up*up;
+    p.y+=up*flameHeight(f)*.10*sin(t*11.+c.z*3.);
+  }
   if(mat==6.){p+=vec3f(sin(t*.79+pos.z)*.63,sin(t*1.1+pos.x)*.29,cos(t*.66+pos.x)*.41);}
   let actor=actorIndex(mat);
   if(actor>=0){p+=camera.actors[u32(actor)].xyz;}
@@ -1697,7 +1736,8 @@ fn actorIndex(mat:f32)->i32{
   let t=camera.eye.w; let tombOn=camera.vault.x;
   if((kind==26.||kind==27.) && camera.vault.y<.034){discard;}
   if(kind==28. && wickLevel(p.z,camera.tomb.w)<.002){discard;}
-  let uv=input.surface.xz+input.surface.y*vec2f(.49,1.10);
+  let axes=abs(n0);
+  let uv=select(vec2f(select(input.surface.x,input.surface.z,axes.x>axes.z),input.surface.y*1.6),input.surface.xz+input.surface.y*vec2f(.49,1.10),axes.y>max(axes.x,axes.z));
   let grain=.69+.49*noise(uv*8.7)+.29*noise(uv*38.);
   let side=max(0.,dot(n0,normalize(vec3f(-.36,.82,-.46))));
   var base=input.col*grain;
@@ -1709,7 +1749,10 @@ fn actorIndex(mat:f32)->i32{
     let moss=smoothstep(.56,.81,cloud(p.xz*2.+p.y*vec2f(.32,-1.1)))*(1.-smoothstep(.22,1.43,p.y-p.z*.036));
     base=mix(base,vec3f(.13,.20,.115),moss*select(.63,.14,kind==19.));
     let scale=noise(uv*31.)*noise(uv*9.);
-    if(kind==19.){base=mix(base,vec3f(.20,.108,.062),smoothstep(.30,.52,scale)*.55);}
+    if(kind==19.){
+      let brass=input.col.r>input.col.g*1.12&&abs(p.x)<2.6&&p.z>23.4&&p.z<33.2;
+      base=select(mix(base,vec3f(.20,.108,.062),smoothstep(.30,.52,scale)*.55),mix(base*.8,vec3f(.12,.17,.135),smoothstep(.28,.56,scale)*.5),brass);
+    }
     if(kind==15.||kind==8.){
       let running=noise(vec2f(uv.x*28.7,uv.y*3.1));
       let pores=smoothstep(.53,.87,noise(uv*49.));
@@ -1813,13 +1856,32 @@ fn actorIndex(mat:f32)->i32{
   }
   if(kind==8.){color=base*(.14+tombOn*.49)+vec3f(.14,.052,.012)*warmth;}
   if(kind==15.){color*=mix(1.,.22+tombOn*.48,interior*select(0.,1.,abs(p.x)<.98 && p.y<4.4));}
-  let room=(1.-smoothstep(2.6,2.85,abs(p.x)))*smoothstep(23.6,24.85,p.z)*(1.-smoothstep(32.9,33.2,p.z))*(1.-smoothstep(4.5,5.0,p.y));
-  let nearWick=vec3f(abs(p.x)-1.99,p.y-2.92,p.z-27.20);
-  let farWick=vec3f(nearWick.xy,p.z-32.14);
-  let glow=wickLevel(27.20,camera.tomb.w)/(1.+dot(nearWick,nearWick)*1.6)+wickLevel(32.14,camera.tomb.w)/(1.+dot(farWick,farWick)*1.6);
+  var room=(1.-smoothstep(2.6,2.85,abs(p.x)))*smoothstep(23.6,24.85,p.z)*(1.-smoothstep(32.9,33.2,p.z))*(1.-smoothstep(4.5,5.0,p.y));
+  if(kind!=26.&&kind!=27.&&abs(p.x)<2.6&&p.z<33.&&p.y<4.6){room=max(room,smoothstep(23.48,23.62,p.z));}
   let localLight=wickLevel(p.z,camera.tomb.w);
-  color*=mix(1.,.025+.255*localLight,room);
-  color+=room*base*(vec3f(.12,.14,.17)*localLight+vec3f(1.04,.52,.17)*glow);
+  let cn=select(n,-n,dot(n,view)<0.);
+  let above=p.y-1.09;let gap=2.30-abs(p.x);
+  let ao=(1.-.45*exp(-max(above,0.)*4.5)*(1.-abs(cn.y)))*(1.-.40*exp(-max(gap,0.)*4.)*max(0.,cn.y));
+  color*=mix(1.,(.02+.05*localLight)*ao,room);
+  let metal=kind==19.;let wax=kind==18.;
+  let damp=select(0.,smoothstep(.44,.70,cloud(p.xz*1.6+vec2f(3.1))),kind==15.&&cn.y>.8&&p.z>24.);
+  let rough=select(mix(10.,140.,damp),42.,metal);
+  var lit=0.;var shine=0.;var through=0.;
+  for(var i=0u;i<select(0u,9u,room>.001||wax);i++){
+    let c=flames[i];var power=wickLevel(c.z,camera.tomb.w);
+    if(power<.002||slabBlocks(p,c)){continue;}
+    power*=candleFlicker(c,t);
+    let L=c-p;let d2=dot(L,L);let l=L*inverseSqrt(d2);
+    let wrap=select(.10,.7,wax);
+    let fall=power*1.4/(.25+d2*1.2);
+    lit+=fall*max(0.,(dot(cn,l)+wrap)/(1.+wrap));
+    shine+=fall*max(0.,dot(cn,l))*pow(max(0.,dot(cn,normalize(l+view))),rough)*(rough+8.)/60.;
+    through+=power*exp(-sqrt(d2)*16.);
+  }
+  let flameTint=vec3f(1.,.64,.36);
+  let specTint=select(vec3f(1.),base*2.2+vec3f(.04),metal);
+  color+=room*ao*flameTint*(base*lit*select(1.,.40,metal)+shine*specTint*select(.03+.65*damp,.85,metal));
+  if(wax){color+=base*vec3f(1.1,.50,.18)*through;}
   if(kind==-4.||kind==-5.){
     let relief=noise(p.xz*67.+p.y*vec2f(41.,23.));
     color+=base*vec3f(.33,.35,.38)*(.25+.75*max(0.,dot(n,normalize(vec3f(.15,.41,-.88)))))*(.59+.66*relief);
@@ -1831,16 +1893,15 @@ fn actorIndex(mat:f32)->i32{
     color=base*vec3f(.81,.91,1.07)+vec3f(1.70,.008,.002)*redEye;
   }
   if(kind==-6.){color=vec3f(2.4,.015,.004);}
-  if(p.x>.19 && p.x<2.10 && p.z>26.60 && p.z<32.18 && p.y<2.88){
-    let d1=p-vec3f(1.94,1.51,27.89);
-    let d2=p-vec3f(1.94,-.28,30.39);
-    let pool=.90*wickLevel(27.89,camera.tomb.w)/(.48+dot(d1,d1))+.83*wickLevel(30.39,camera.tomb.w)/(.56+dot(d2,d2));
-    let edge=smoothstep(.19,.49,p.x)*(1.-smoothstep(1.99,2.10,p.x))*smoothstep(26.60,26.94,p.z)*(1.-smoothstep(31.92,32.18,p.z))*(1.-smoothstep(2.45,2.88,p.y));
-    color+=edge*base*(vec3f(.105,.125,.155)*localLight+vec3f(.65,.32,.115)*pool);
+  if(kind==28.){
+    let f=nearestFlame(p);let c=flames[f];
+    let burn=wickLevel(c.z,camera.tomb.w);let v=clamp((p.y-c.y)/(2.*flameHeight(f))+.5,0.,1.);
+    var body=mix(vec3f(5.4,3.9,1.9),vec3f(3.0,1.15,.30),smoothstep(.50,1.,v));
+    body=mix(vec3f(.55,.55,1.05),body,smoothstep(.02,.24,v));
+    color=body*burn*(.62+.38*abs(dot(n,view)))*candleFlicker(c,t);
   }
-  if(kind==28.){let burn=wickLevel(p.z,camera.tomb.w);color=vec3f(4.1*burn,1.95*burn*burn,.44*burn*burn)*(.94+.06*sin(t*9.+p.z));}
   let air=atmosphere(delta/dist,dist);
-  return vec4f(color*air.a+air.rgb+glare(delta/dist,dist),1);
+  return vec4f(color*air.a+air.rgb+candleHaze(delta/dist,dist)+glare(delta/dist,dist),1);
 }
 @group(1) @binding(0) var sceneColor: texture_2d<f32>;
 @group(1) @binding(1) var bloomSampler: sampler;
@@ -2005,6 +2066,35 @@ vec3 glare(vec3 dir,float depth){
   }
   return g;
 }
+float flameHeight(int i){return i<2?.05:i<6?.067:.046;}
+int nearestFlame(vec3 p){
+  int best=0;float d=1e9;
+  for(int i=0;i<9;i++){vec3 q=p-flames[i];float e=dot(q,q);if(e<d){d=e;best=i;}}
+  return best;
+}
+float candleFlicker(vec3 c,float t){return .88+.08*sin(t*9.3+c.z*7.)+.05*sin(t*23.+c.x*11.);}
+// The chamber floor is one slab. Light crosses between the chamber and the stairwell only through the opening.
+bool slabBlocks(vec3 p,vec3 c){
+  const float floorY=1.09;
+  if((p.y<floorY-.04)==(c.y<floorY-.04))return false;
+  vec2 q=p.xz+(c.xz-p.xz)*(floorY-p.y)/(c.y-p.y);
+  return q.x<.50||q.x>2.03||q.y<26.73||q.y>32.05;
+}
+// Candle light scattered by the crypt's damp air, integrated in closed form along the view ray.
+vec3 candleHaze(vec3 dir,float depth){
+  vec3 h=vec3(0.);float len=min(depth,40.);
+  if(tomb.w<.001)return h;
+  for(int k=0;k<9;k++){
+    vec3 c=flames[k];float power=wickLevel(c.z,tomb.w);
+    if(power<.002)continue;
+    vec3 o=c-eye.xyz;float s0=dot(o,dir);vec3 close=eye.xyz+dir*clamp(s0,0.,len);
+    float inside=(1.-smoothstep(2.45,2.99,abs(close.x)))*smoothstep(23.0,24.4,close.z)*(1.-smoothstep(32.7,33.2,close.z));
+    if(inside<.01||slabBlocks(close,c))continue;
+    float q=.05+2.2*max(dot(o,o)-s0*s0,0.),k2=sqrt(2.2/q);
+    h+=power*candleFlicker(c,eye.w)*inside*(atan((len-s0)*k2)+atan(s0*k2))/sqrt(2.2*q);
+  }
+  return vec3(1.,.62,.34)*h*.023;
+}
 vec4 atmosphere(vec3 dir,float depth){
   float tr=1.,dt=min(36.,depth)/9.;
   vec3 fog=vec3(0.);
@@ -2019,10 +2109,10 @@ vec4 atmosphere(vec3 dir,float depth){
     float dy=(y-(.12+.41*bank))/(.15+.22*bank);
     float spill=exp(-distance(p,vec3(0.,.97,22.6))*.57)*vault.z;
     float outside=1.-(1.-smoothstep(2.45,2.99,abs(p.x)))*smoothstep(23.0,24.4,p.z)*(1.-smoothstep(32.7,33.2,p.z));
-    float density=.0028+outside*(.038*exp(-y*2.5)+.36*bank*exp(-dy*dy))+.043*spill*exp(-y*.9);
+    float density=.0028+outside*(.038*exp(-y*2.5)+.36*bank*exp(-dy*dy))+.043*spill*exp(-y*.9)+(1.-outside)*.034;
     float amount=1.-exp(-density*dt);
-    vec3 energy=vec3(.084,.119,.173)+vec3(.15,.20,.27)*lobe*moonVisibility(p,.11);
-    energy+=vec3(.58,.73,.96)*vault.w;
+    vec3 energy=(vec3(.084,.119,.173)+vec3(.15,.20,.27)*lobe*moonVisibility(p,.11))*mix(.10,1.,outside);
+    energy+=vec3(.58,.73,.96)*vault.w*mix(.15,1.,outside);
     for(int j=0;j<4;j++){
       vec3 diff=lantern[j].xyz-p;
       energy+=vec3(.72,.29,.065)*.73/(1.+dot(diff,diff)*1.20);
@@ -2121,6 +2211,11 @@ void main(){
     p.x+=.065*sin(lift*3.14);
   }
   if(mat==5.)p.x+=max(0.,pos.y-pos.z*.036)*.13*sin(t*1.5+p.z*3.2+p.x);
+  if(mat==28.){
+    int f=nearestFlame(pos);vec3 c=flames[f];float up=clamp((pos.y-c.y)/flameHeight(f)+.6,0.,1.7);
+    p.xz+=vec2(sin(t*6.1+c.z*5.)+.4*sin(t*15.+c.x*9.),cos(t*7.3+c.x*4.))*.0055*up*up;
+    p.y+=up*flameHeight(f)*.10*sin(t*11.+c.z*3.);
+  }
   if(mat==6.)p+=vec3(sin(t*.79+pos.z)*.63,sin(t*1.1+pos.x)*.29,cos(t*.66+pos.x)*.41);
   int actor=actorIndex(mat);
   if(actor>=0)p+=actors[actor].xyz;
@@ -2145,7 +2240,8 @@ void main(){
   float t=eye.w,dist=max(length(delta),.01),tombOn=vault.x;
   if((kind==26.||kind==27.)&&vault.y<.034)discard;
   if(kind==28. && wickLevel(p.z,tomb.w)<.002)discard;
-  vec2 uv=surface.xz+surface.y*vec2(.49,1.10);
+  vec3 axes=abs(n0);
+  vec2 uv=axes.y>max(axes.x,axes.z)?surface.xz+surface.y*vec2(.49,1.10):vec2(axes.x>axes.z?surface.z:surface.x,surface.y*1.6);
   float grain=.69+.49*noise(uv*8.7)+.29*noise(uv*38.);
   float side=max(0.,dot(normal,normalize(vec3(-.36,.82,-.46))));
   vec3 base=col*grain;
@@ -2157,7 +2253,10 @@ void main(){
     float moss=smoothstep(.56,.81,cloud(p.xz*2.+p.y*vec2(.32,-1.1)))*(1.-smoothstep(.22,1.43,p.y-p.z*.036));
     base=mix(base,vec3(.13,.20,.115),moss*(kind==19.?.14:.63));
     float scale=noise(uv*31.)*noise(uv*9.);
-    if(kind==19.)base=mix(base,vec3(.20,.108,.062),smoothstep(.30,.52,scale)*.55);
+    if(kind==19.){
+      bool brass=col.r>col.g*1.12&&abs(p.x)<2.6&&p.z>23.4&&p.z<33.2;
+      base=brass?mix(base*.8,vec3(.12,.17,.135),smoothstep(.28,.56,scale)*.5):mix(base,vec3(.20,.108,.062),smoothstep(.30,.52,scale)*.55);
+    }
     if(kind==15.||kind==8.){
       float running=noise(vec2(uv.x*28.7,uv.y*3.1));
       float pores=smoothstep(.53,.87,noise(uv*49.));
@@ -2257,12 +2356,34 @@ void main(){
   if(kind==8.)color=base*(.14+tombOn*.49)+vec3(.14,.052,.012)*warmth;
   if(kind==15.)color*=mix(1.,.22+tombOn*.48,interior*((abs(p.x)<.98&&p.y<4.4)?1.:0.));
   float room=(1.-smoothstep(2.6,2.85,abs(p.x)))*smoothstep(23.6,24.85,p.z)*(1.-smoothstep(32.9,33.2,p.z))*(1.-smoothstep(4.5,5.0,p.y));
-  vec3 nearWick=vec3(abs(p.x)-1.99,p.y-2.92,p.z-27.20);
-  vec3 farWick=vec3(nearWick.xy,p.z-32.14);
-  float glow=wickLevel(27.20,tomb.w)/(1.+dot(nearWick,nearWick)*1.6)+wickLevel(32.14,tomb.w)/(1.+dot(farWick,farWick)*1.6);
+  // Everything behind the inner face of the front wall is out of the moonlight. The guardian keeps its own light.
+  if(kind!=26.&&kind!=27.&&abs(p.x)<2.6&&p.z<33.&&p.y<4.6)room=max(room,smoothstep(23.48,23.62,p.z));
   float localLight=wickLevel(p.z,tomb.w);
-  color*=mix(1.,.025+.255*localLight,room);
-  color+=room*base*(vec3(.12,.14,.17)*localLight+vec3(1.04,.52,.17)*glow);
+  // Candles are the only real light below ground. Corners where wall meets floor stay darker.
+  // Some vault strips are wound outward. Light the side the visitor can see.
+  vec3 cn=dot(normal,wetView)<0.?-normal:normal;
+  float above=p.y-1.09,gap=2.30-abs(p.x);
+  float ao=(1.-.45*exp(-max(above,0.)*4.5)*(1.-abs(cn.y)))*(1.-.40*exp(-max(gap,0.)*4.)*max(0.,cn.y));
+  color*=mix(1.,(.02+.05*localLight)*ao,room);
+  bool metal=kind==19.,wax=kind==18.;
+  float damp=(kind==15.&&cn.y>.8&&p.z>24.)?smoothstep(.44,.70,cloud(p.xz*1.6+3.1)):0.;
+  float rough=metal?42.:mix(10.,140.,damp);
+  vec3 lit=vec3(0.),shine=vec3(0.);float through=0.;
+  if(room>.001||wax)for(int i=0;i<9;i++){
+    vec3 c=flames[i];float power=wickLevel(c.z,tomb.w);
+    if(power<.002||slabBlocks(p,c))continue;
+    power*=candleFlicker(c,t);
+    vec3 L=c-p;float d2=dot(L,L);vec3 l=L*inversesqrt(d2);
+    float wrap=wax?.7:.10;
+    float fall=power*1.4/(.25+d2*1.2);
+    lit+=fall*max(0.,(dot(cn,l)+wrap)/(1.+wrap));
+    shine+=fall*max(0.,dot(cn,l))*pow(max(0.,dot(cn,normalize(l+wetView))),rough)*(rough+8.)/60.;
+    through+=power*exp(-sqrt(d2)*16.);
+  }
+  vec3 flameTint=vec3(1.,.64,.36);
+  vec3 specTint=metal?base*2.2+vec3(.04):vec3(1.);
+  color+=room*ao*flameTint*(base*lit*(metal?.40:1.)+shine*specTint*(metal?.85:.03+.65*damp));
+  if(wax)color+=base*vec3(1.1,.50,.18)*through;
   if(kind==-4.||kind==-5.){
     float relief=noise(p.xz*67.+p.y*vec2(41.,23.));
     color+=base*vec3(.33,.35,.38)*(.25+.75*max(0.,dot(normal,normalize(vec3(.15,.41,-.88)))))*(.59+.66*relief);
@@ -2274,16 +2395,16 @@ void main(){
     color=base*vec3(.81,.91,1.07)+vec3(1.70,.008,.002)*redEye;
   }
   if(kind==-6.){color=vec3(2.4,.015,.004);}
-  if(p.x>.19 && p.x<2.10 && p.z>26.60 && p.z<32.18 && p.y<2.88){
-    vec3 d1=p-vec3(1.94,1.51,27.89);
-    vec3 d2=p-vec3(1.94,-.28,30.39);
-    float pool=.90*wickLevel(27.89,tomb.w)/(.48+dot(d1,d1))+.83*wickLevel(30.39,tomb.w)/(.56+dot(d2,d2));
-    float edge=smoothstep(.19,.49,p.x)*(1.-smoothstep(1.99,2.10,p.x))*smoothstep(26.60,26.94,p.z)*(1.-smoothstep(31.92,32.18,p.z))*(1.-smoothstep(2.45,2.88,p.y));
-    color+=edge*base*(vec3(.105,.125,.155)*localLight+vec3(.65,.32,.115)*pool);
+  if(kind==28.){
+    // Blue at the root, a bright body and an orange, thinning tip.
+    int f=nearestFlame(p);vec3 c=flames[f];
+    float burn=wickLevel(c.z,tomb.w),v=clamp((p.y-c.y)/(2.*flameHeight(f))+.5,0.,1.);
+    vec3 body=mix(vec3(5.4,3.9,1.9),vec3(3.0,1.15,.30),smoothstep(.50,1.,v));
+    body=mix(vec3(.55,.55,1.05),body,smoothstep(.02,.24,v));
+    color=body*burn*(.62+.38*abs(dot(normal,wetView)))*candleFlicker(c,t);
   }
-  if(kind==28.){float burn=wickLevel(p.z,tomb.w);color=vec3(4.1*burn,1.95*burn*burn,.44*burn*burn)*(.94+.06*sin(t*9.+p.z));}
   vec4 air=atmosphere(delta/dist,dist);
-  outColor=vec4(filmic(color*air.a+air.rgb+glare(delta/dist,dist)),1.);
+  outColor=vec4(filmic(color*air.a+air.rgb+candleHaze(delta/dist,dist)+glare(delta/dist,dist)),1.);
 }
 `;
 
@@ -2611,10 +2732,10 @@ function software(canvas, mesh, moonDepth){
         const flow=x-t*.67,along=z+t*.13,warp=texture(flow*2.3,along*2.3);
         const fold=.5+.5*cos(flow*1.14+along*.23+4.2*warp+.7*sin(along*.71+t*.18));
         const bank=sstep(.24,.94,fold)*(.45+.55*warp),low=max(0,altitude-.065);
-        const dy=(low-.12-.41*bank)/(.15+.22*bank);
+        const band=(low-.12-.41*bank)/(.15+.22*bank);
         const outside=1-(1-sstep(2.45,2.99,abs(x)))*sstep(23,24.4,z)*(1-sstep(32.7,33.2,z));
         const door=exp(-.72*(abs(x)+abs(z-22.69)));
-        const density=.0028+outside*(.038*exp(-low*2.5)+.36*bank*exp(-dy*dy))+data[154]*door*.10*exp(-2.6*low);
+        const density=.0028+outside*(.038*exp(-low*2.5)+.36*bank*exp(-band*band))+data[154]*door*.10*exp(-2.6*low);
         const lit=visibility(x,y,z,.11);
         const visible=density*step*max(.13,exp(-extinction));
         extinction+=density*step;
@@ -2859,12 +2980,19 @@ function software(canvas, mesh, moonDepth){
       }
       const distance=sqrt(x*x+y*y+z*z);
       let room=0;
-      if(z0>23.6&&z0<33.2&&abs(x0)<2.85&&y0<5){
+      if(z0>23.48&&z0<33.2&&abs(x0)<2.85&&y0<5){
         room=(1-sstep(2.6,2.85,abs(x0)))*sstep(23.6,24.85,z0)*(1-sstep(32.9,33.2,z0))*(1-sstep(4.5,5,y0));
-        const side=(abs(x0)-1.99)**2+(y0-2.92)**2,local=wickLevel(z0,data[39]);
-        const glow=wickLevel(27.20,data[39])/(1+1.6*(side+(z0-27.20)**2))+wickLevel(32.14,data[39])/(1+1.6*(side+(z0-32.14)**2));
-        const dim=mix(1,.025+.255*local,room);
-        r=r*dim+room*red*(.12*local+1.04*glow);g=g*dim+room*green*(.14*local+.52*glow);b=b*dim+room*blue*(.17*local+.17*glow);
+        if(!guardian&&abs(x0)<2.6&&z0<33&&y0<4.6)room=max(room,sstep(23.48,23.62,z0));
+        const local=wickLevel(z0,data[39]),px=x0+xa,py=y0+ya,pz=z0+za;
+        let glow=0;
+        for(const [cx,cy,cz] of flamePoints){
+          const power=wickLevel(cz,data[39]);
+          if(power<.002||slabBlocks(px,py,pz,cx,cy,cz))continue;
+          const dx=cx-px,dy=cy-py,dz=cz-pz,d2=dx*dx+dy*dy+dz*dz;
+          glow+=power*max(0,(nx*dx+ny*dy+nz*dz)/sqrt(d2)+.1)/1.1*1.4/(.25+d2*1.2);
+        }
+        const dim=mix(1,.02+.05*local,room);
+        r=r*dim+room*red*glow;g=g*dim+room*green*.64*glow;b=b*dim+room*blue*.36*glow;
       }
       const flash=data[155]*(1-.91*room)*(.21+1.37*max(0,-.28*nx+.69*ny+.68*nz));
       r+=red*.89*flash;g+=green*1.04*flash;b+=blue*1.28*flash;
@@ -2873,13 +3001,6 @@ function software(canvas, mesh, moonDepth){
         const key=.23+.77*max(0,.15*nx+.41*ny-.88*nz);r+=red*.33*key;g+=green*.35*key;b+=blue*.38*key;
       }
       if(kind===-6){r=2.4;g=.015;b=.004;}
-      if(x0+xa>.19&&x0+xa<2.10&&z0+za>26.60&&z0+za<32.18&&y0+ya<2.88){
-        const dx=x0+xa-1.94,py=y0+ya,pz=z0+za;
-        const local=wickLevel(pz,data[39]);
-        const pool=.90*wickLevel(27.89,data[39])/(.48+dx*dx+(py-1.51)**2+(pz-27.89)**2)+.83*wickLevel(30.39,data[39])/(.56+dx*dx+(py+.28)**2+(pz-30.39)**2);
-        const px=x0+xa,edge=sstep(.19,.49,px)*(1-sstep(1.99,2.10,px))*sstep(26.60,26.94,pz)*(1-sstep(31.92,32.18,pz))*(1-sstep(2.45,2.88,py));
-        r+=edge*red*(.105*local+.65*pool);g+=edge*green*(.125*local+.32*pool);b+=edge*blue*(.155*local+.115*pool);
-      }
       if(kind===28){
         const burn=wickLevel(z0,data[39]),flicker=.94+.06*sin(t*9+z0);
         r=4.1*burn*flicker;g=1.95*burn*burn*flicker;b=.44*burn*burn*flicker;
@@ -3094,11 +3215,24 @@ function footstep(camera){
   src.connect(gain);gain.connect(pan);pan.connect(master);
   src.onended=()=>{src.disconnect();gain.disconnect();pan.disconnect();};src.start();
 }
+// Water collects on the vault and falls into a shallow puddle somewhere out of sight.
+let nextDrip=0;
+function drip(level){
+  const now=audio.currentTime,o=audio.createOscillator(),g=audio.createGain(),pan=audio.createStereoPanner();
+  const f=900+Math.random()*900;
+  o.frequency.setValueAtTime(f,now);o.frequency.exponentialRampToValueAtTime(f*2.3,now+.045);
+  g.gain.setValueAtTime(.0001,now);g.gain.exponentialRampToValueAtTime(.05*level*(.5+Math.random()),now+.004);
+  g.gain.exponentialRampToValueAtTime(.0001,now+.07);
+  pan.pan.value=Math.random()*1.6-.8;
+  o.connect(g);g.connect(pan);pan.connect(master);o.start(now);o.stop(now+.08);
+  o.onended=()=>{o.disconnect();g.disconnect();pan.disconnect();};
+}
 function audioSpace(camera){
   if(!audio||!reverbSend)return;
   const inside=(1-sstep(2.6,3.1,abs(camera.x)))*sstep(23.0,24.2,camera.z)*(1-sstep(32.9,33.4,camera.z));
   const below=sstep(.5,-1.2,camera.y-1.63);
   const level=inside*(.7+.3*below);
+  if(level>.3&&audio.currentTime>nextDrip){drip(level);nextDrip=audio.currentTime+1.1+Math.random()*Math.random()*6;}
   if(abs(level-roomLevel)<.01)return;
   roomLevel=level;
   const now=audio.currentTime;
