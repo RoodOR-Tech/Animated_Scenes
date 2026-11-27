@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1017">
+<meta name="description" content="Interactive scenes you can walk through in the browser.">
+<title>Animated Scenes</title>
+<style>
+:root{color-scheme:dark;--ink:#eee8db;--dim:#b5b7bd;--gold:#e8bb7d;--line:#d4c4a938;--panel:#111620}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#0c1017;color:var(--ink);font-family:system-ui,sans-serif}
+main{max-width:1080px;margin:0 auto;padding:clamp(28px,6vw,88px) 16px 64px}
+.label{display:flex;align-items:center;gap:13px;color:var(--gold);font-size:11px;text-transform:uppercase;letter-spacing:.29em;font-weight:650;margin:0 0 18px}
+.label:before{content:"";width:30px;height:1px;background:currentColor}
+h1{font-family:Georgia,serif;font-weight:400;line-height:.9;letter-spacing:-.05em;font-size:clamp(44px,7vw,88px);margin:0}
+.intro{color:var(--dim);font-size:clamp(14px,1.4vw,17px);line-height:1.55;max-width:46ch;margin:20px 0 44px}
+.scenes{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:20px}
+.scene{display:block;color:inherit;text-decoration:none;border:1px solid var(--line);background:var(--panel);transition:border-color .2s}
+.scene:hover,.scene:focus-visible{border-color:#edcea1aa}
+.scene:focus-visible{outline:2px solid #f8d5a0;outline-offset:4px}
+.scene img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;background:#05080d}
+.scene div{padding:18px 20px 22px}
+.scene h2{font-family:Georgia,serif;font-weight:400;font-size:28px;letter-spacing:-.03em;margin:0 0 8px}
+.scene p{margin:0;color:var(--dim);font-size:14px;line-height:1.55}
+.scene .go{margin-top:14px;color:var(--gold);font-size:13px;font-weight:650}
+footer{margin-top:48px;color:var(--dim);font-size:12px;line-height:1.6}
+</style>
+</head>
+<body>
+<main>
+  <p class="label">Interactive scenes</p>
+  <h1>Animated Scenes</h1>
+  <p class="intro">Places you can walk through in the browser, or leave running as a display. Best in Chrome or Edge with hardware acceleration and sound on.</p>
+  <section class="scenes" aria-label="Scenes">
+    <a class="scene" href="rood-hill-cemetery.html">
+      <img src="thumbs/rood-hill-cemetery.jpg" width="960" height="540" alt="The lantern-lit gate of Rood Hill Cemetery under a stormy moonlit sky">
+      <div>
+        <h2>Rood Hill Cemetery</h2>
+        <p>Halloween night. Follow the lanterns past the open graves to the mausoleum and down into the candlelit crypt.</p>
+        <p class="go">Enter the cemetery →</p>
+      </div>
+    </a>
+  </section>
+  <footer>Walk with WASD and the mouse, or the on-screen arrows on touch screens. M mutes, Esc returns to the menu. The first load is about 4&nbsp;MB.</footer>
+</main>
+</body>
+</html>
