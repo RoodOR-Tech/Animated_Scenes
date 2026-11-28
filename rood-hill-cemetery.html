@@ -16,7 +16,7 @@
 <style>
 :root{color-scheme:dark;--ink:#eee8db;--dim:#b5b7bd;--gold:#e8bb7d;--panel:#111620}
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0c1017;color:var(--ink);font-family:system-ui,sans-serif}
-body:after{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 48%,transparent 46%,#05080d45 100%)}
+body:after{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 48%,transparent 40%,#05080d6e 100%)}
 canvas{display:block;width:100%;height:100%;touch-action:none}
 button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
 /* Holding a control must not start a text selection or the long-press menu. */
@@ -1516,11 +1516,13 @@ function moonSampler(depth){
   };
 }
 
+// One exposure for every renderer. Lower is darker; flames and lanterns sit above the curve's shoulder and stay bright.
+const SCENE_EXPOSURE=0.78;
 const colorResponse=new Uint8Array(1024);
 function filmic(value){
   return clamp((value*(2.51*value+.03))/(value*(2.43*value+.59)+.14),0,1);
 }
-for(let i=0;i<colorResponse.length;i++)colorResponse[i]=round(255*pow(filmic(i/512),.85));
+for(let i=0;i<colorResponse.length;i++)colorResponse[i]=round(255*pow(filmic(i/512*SCENE_EXPOSURE),.85));
 
 
 const gpuSource = /* wgsl */ `
@@ -1570,7 +1572,7 @@ fn sky(dir:vec3f)->vec3f{
 }
 
 fn filmic(c:vec3f)->vec3f{
-  let x=max(vec3f(0.),c);
+  let x=max(vec3f(0.),c*${SCENE_EXPOSURE});
   return pow(clamp(x*(2.51*x+vec3f(.03))/(x*(2.43*x+vec3f(.59))+vec3f(.14)),vec3f(0.),vec3f(1.)),vec3f(.88));
 }
 fn moonVisibility(p:vec3f,bias:f32)->f32{
@@ -2047,7 +2049,7 @@ float noise(vec2 p){
 float cloud(vec2 p){return noise(p)*.58+noise(p*2.1+17.)*.27+noise(p*4.5-24.)*.15;}
 const vec3 moon=vec3(.337,.274,.900);
 vec3 filmic(vec3 c){
-  vec3 x=max(vec3(0.),c);
+  vec3 x=max(vec3(0.),c*${SCENE_EXPOSURE});
   return pow(clamp(x*(2.51*x+.03)/(x*(2.43*x+.59)+.14),0.,1.),vec3(.88));
 }
 float moonVisibility(vec3 p,float bias){
@@ -2562,9 +2564,10 @@ function software(canvas, mesh, moonDepth){
   const srcPen=skySrc.getContext('2d');srcPen.drawImage(nightSky,0,0);
   const sourcePixels=srcPen.getImageData(0,0,skySrc.width,skySrc.height);
   for(let i=0;i<sourcePixels.data.length;i+=4){
-    sourcePixels.data[i]=sourcePixels.data[i]*.65+3;
-    sourcePixels.data[i+1]=sourcePixels.data[i+1]*.65+6;
-    sourcePixels.data[i+2]=sourcePixels.data[i+2]*.65+11;
+    const sky=.65*pow(SCENE_EXPOSURE,.55);
+    sourcePixels.data[i]=sourcePixels.data[i]*sky+3;
+    sourcePixels.data[i+1]=sourcePixels.data[i+1]*sky+6;
+    sourcePixels.data[i+2]=sourcePixels.data[i+2]*sky+11;
   }
   const skyColors=new Uint32Array(sourcePixels.data.buffer);
   let skyFrame,skyOut,skyU,skyRow,skyPitch,skyLens;
